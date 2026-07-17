@@ -69,6 +69,8 @@ function FileCard({
   detail,
   count,
   ready,
+  stateLabel,
+  removable = true,
   onClear,
 }: {
   eyebrow: string;
@@ -76,6 +78,8 @@ function FileCard({
   detail: string;
   count?: number;
   ready: boolean;
+  stateLabel?: string;
+  removable?: boolean;
   onClear: () => void;
 }) {
   return (
@@ -86,8 +90,10 @@ function FileCard({
         <p>{detail}</p>
       </div>
       <div className="file-actions">
-        <span className="file-state">{ready ? "Added" : "Not added"}</span>
-        {ready && (
+        <span className="file-state">
+          {ready ? stateLabel ?? "Added" : "Not added"}
+        </span>
+        {ready && removable && (
           <button type="button" className="text-button" onClick={onClear}>
             Remove{count && count > 1 ? ` ${count}` : ""}
           </button>
@@ -447,7 +453,7 @@ export default function Home() {
 
         <p className="file-guidance">
           Convert a whole database, selected individual presets, or both.
-          REAPER scan caches are needed for VST3 identity matching.
+          A built-in REAPER scan cache handles VST3 identity matching.
         </p>
 
         <div className="file-grid">
@@ -488,18 +494,20 @@ export default function Home() {
             eyebrow="VST3"
             title={
               bundle.caches.length
-                ? `${bundle.caches.length} REAPER scan cache${
+                ? `${bundle.caches.length} additional REAPER scan cache${
                     bundle.caches.length === 1 ? "" : "s"
                   }`
-                : "REAPER scan cache"
+                : "Built-in REAPER scan cache"
             }
             detail={
               bundle.caches.length
                 ? formatBytes(cacheSize)
-                : "reaper-vstplugins*.ini resolves plugin identities"
+                : "Included automatically; add your own only for missing plugins"
             }
             count={bundle.caches.length}
-            ready={bundle.caches.length > 0}
+            ready
+            stateLabel={bundle.caches.length ? "Added" : "Included"}
+            removable={bundle.caches.length > 0}
             onClear={() =>
               setBundle((current) => ({ ...current, caches: [] }))
             }
@@ -537,8 +545,8 @@ export default function Home() {
 
         {inputReady && !bundle.caches.length && (
           <p className="inline-note">
-            No REAPER scan cache selected. VST2 can still convert, but VST3
-            entries without an identity match will be skipped.
+            Using the built-in REAPER scan cache. Add your own only if a VST3
+            plugin is missing; your file will take priority.
           </p>
         )}
 
@@ -609,8 +617,9 @@ export default function Home() {
           <div>
             <dt>For VST3 presets</dt>
             <dd>
-              Add REAPER&apos;s <code>reaper-vstplugins*.ini</code> scan cache
-              so plugins can be identified.
+              A REAPER scan cache is included automatically. Add your own
+              <code> reaper-vstplugins*.ini</code> only to extend or override
+              its plugin coverage.
             </dd>
           </div>
           <div>

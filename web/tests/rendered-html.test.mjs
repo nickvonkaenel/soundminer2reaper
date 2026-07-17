@@ -38,17 +38,21 @@ test("server-renders the browser converter", async () => {
   assert.match(html, /One or more \.dsppreset files/i);
   assert.match(html, /Drop files here/i);
   assert.match(html, /Nothing is uploaded/i);
+  assert.match(html, /Built-in REAPER scan cache/i);
+  assert.match(html, /included automatically/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
 test("ships the converter assets and removes the starter", async () => {
-  const [packageJson, page, worker, adapter, converter] = await Promise.all([
-    readFile(new URL("package.json", root), "utf8"),
-    readFile(new URL("app/page.tsx", root), "utf8"),
-    readFile(new URL("public/converter-worker.mjs", root), "utf8"),
-    readFile(new URL("public/web_adapter.py", root), "utf8"),
-    readFile(new URL("public/sm2reaper.py", root), "utf8"),
-  ]);
+  const [packageJson, page, worker, adapter, converter, defaultCache] =
+    await Promise.all([
+      readFile(new URL("package.json", root), "utf8"),
+      readFile(new URL("app/page.tsx", root), "utf8"),
+      readFile(new URL("public/converter-worker.mjs", root), "utf8"),
+      readFile(new URL("public/web_adapter.py", root), "utf8"),
+      readFile(new URL("public/sm2reaper.py", root), "utf8"),
+      readFile(new URL("public/default-vst3-scan-cache.ini", root), "utf8"),
+    ]);
 
   assert.match(packageJson, /"name": "soundminer2reaper-web"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -57,8 +61,15 @@ test("ships the converter assets and removes the starter", async () => {
   assert.match(page, /\.dsppreset/);
   assert.match(worker, /pyodide\/v314\.0\.2/);
   assert.match(worker, /presetPaths/);
+  assert.match(worker, /default-vst3-scan-cache\.ini/);
+  assert.ok(
+    worker.indexOf("cachePaths.push(path)") <
+      worker.indexOf("cachePaths.push(DEFAULT_CACHE_PATH)"),
+    "user-provided caches should take priority over the built-in cache",
+  );
   assert.match(adapter, /import sm2reaper/);
   assert.match(converter, /__version__ = "0\.2\.0"/);
+  assert.match(defaultCache, /^\[vstcache\]/);
 
   await assert.rejects(
     access(new URL("app/_sites-preview/SkeletonPreview.tsx", root)),
@@ -68,4 +79,5 @@ test("ships the converter assets and removes the starter", async () => {
   );
   await access(new URL("dist/client/index.html", root));
   await access(new URL("dist/client/converter-worker.mjs", root));
+  await access(new URL("dist/client/default-vst3-scan-cache.ini", root));
 });

@@ -49,7 +49,9 @@ The `web/` project provides a drag-and-drop version of the converter. It accepts
 a preset database, standalone `.dsppreset` exports, or both. The same Python
 implementation runs locally in a browser worker and returns the generated
 chains plus a conversion report as a ZIP. Selected inputs, plugin caches, and
-preset banks are not uploaded or stored by the application.
+preset banks are not uploaded or stored by the application. The browser app
+includes a default REAPER scan cache for VST3 identity matching; users can add
+their own `reaper-vstplugins*.ini` file to extend or override its coverage.
 
 For local web development:
 

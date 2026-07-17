@@ -1,5 +1,7 @@
 const PYODIDE_BASE =
   "https://cdn.jsdelivr.net/pyodide/v314.0.2/full/";
+const DEFAULT_CACHE_NAME = "default-vst3-scan-cache.ini";
+const DEFAULT_CACHE_PATH = `/${DEFAULT_CACHE_NAME}`;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -36,12 +38,18 @@ async function prepareRuntime() {
     });
 
     postStatus("Preparing Soundminer and REAPER support…", 34);
-    const [converterSource, adapterSource] = await Promise.all([
-      fetchText("sm2reaper.py"),
-      fetchText("web_adapter.py"),
-    ]);
+    const [converterSource, adapterSource, defaultCacheSource] =
+      await Promise.all([
+        fetchText("sm2reaper.py"),
+        fetchText("web_adapter.py"),
+        fetchText(DEFAULT_CACHE_NAME),
+      ]);
     pyodide.FS.writeFile("/sm2reaper.py", encoder.encode(converterSource));
     pyodide.FS.writeFile("/web_adapter.py", encoder.encode(adapterSource));
+    pyodide.FS.writeFile(
+      DEFAULT_CACHE_PATH,
+      encoder.encode(defaultCacheSource),
+    );
     await pyodide.runPythonAsync(`
 import importlib
 import sys
@@ -97,6 +105,7 @@ self.onmessage = async (event) => {
       pyodide.FS.writeFile(path, new Uint8Array(file.buffer));
       cachePaths.push(path);
     });
+    cachePaths.push(DEFAULT_CACHE_PATH);
 
     event.data.templates.forEach((file, index) => {
       let name = safeName(file.name, `vst-template-${index}.ini`);
