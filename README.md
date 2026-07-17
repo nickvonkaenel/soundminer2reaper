@@ -36,6 +36,21 @@ python -m pip install .
 sm2reaper --db /path/to/pluginpresets.sqlite --out ./chains
 ```
 
+### Browser app
+
+The `web/` project provides a drag-and-drop version of the converter. It runs
+the same Python implementation locally in a browser worker and returns the
+generated chains plus a conversion report as a ZIP. Selected databases, plugin
+caches, and preset banks are not uploaded or stored by the application.
+
+For local web development:
+
+```console
+cd web
+npm install
+npm run dev
+```
+
 ### Options
 
 | Option | Description |
