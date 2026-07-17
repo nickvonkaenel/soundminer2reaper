@@ -31,11 +31,11 @@ test("server-renders the browser converter", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /soundminer2reaper — Browser preset converter/i);
-  assert.match(html, /Your plugin library/i);
+  assert.match(html, /<title>soundminer2reaper<\/title>/i);
+  assert.match(html, /Convert Soundminer presets to REAPER FX chains/i);
   assert.match(html, /Runs locally in your browser/i);
-  assert.match(html, /Drop conversion files here/i);
-  assert.match(html, /Nothing uploaded\. Nothing stored\./i);
+  assert.match(html, /Drop files here/i);
+  assert.match(html, /Nothing is uploaded/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 

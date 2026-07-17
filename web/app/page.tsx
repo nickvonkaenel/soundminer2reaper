@@ -79,20 +79,20 @@ function FileCard({
   onClear: () => void;
 }) {
   return (
-    <article className={`file-card ${ready ? "is-ready" : ""}`}>
-      <div className="file-card-topline">
-        <span className="file-eyebrow">{eyebrow}</span>
-        <span className="file-state" aria-hidden="true">
-          {ready ? "●" : "○"}
-        </span>
+    <article className={`file-row ${ready ? "is-ready" : ""}`}>
+      <div className="file-copy">
+        <span className="file-label">{eyebrow}</span>
+        <strong>{title}</strong>
+        <p>{detail}</p>
       </div>
-      <strong>{title}</strong>
-      <p>{detail}</p>
-      {ready && (
-        <button type="button" className="text-button" onClick={onClear}>
-          Remove{count && count > 1 ? ` ${count} files` : ""}
-        </button>
-      )}
+      <div className="file-actions">
+        <span className="file-state">{ready ? "Added" : "Not added"}</span>
+        {ready && (
+          <button type="button" className="text-button" onClick={onClear}>
+            Remove{count && count > 1 ? ` ${count}` : ""}
+          </button>
+        )}
+      </div>
     </article>
   );
 }
@@ -327,44 +327,25 @@ export default function Home() {
   return (
     <main className="site-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="soundminer2reaper home">
-          <span className="brand-mark" aria-hidden="true">
-            S→R
-          </span>
-          <span>soundminer2reaper</span>
-        </a>
-        <div className="local-badge">
-          <span className="pulse-dot" aria-hidden="true" />
-          Runs locally in your browser
-        </div>
+        <a className="brand" href="#top">soundminer2reaper</a>
+        <span className="local-badge">Runs locally in your browser</span>
       </header>
 
-      <section className="hero" id="top">
-        <div className="hero-copy">
-          <p className="kicker">Soundminer presets → REAPER FX chains</p>
-          <h1>
-            Your plugin library,
-            <br />
-            ready to <em>drop in.</em>
-          </h1>
-          <p className="hero-lede">
-            Convert Soundminer VST2 and VST3 presets into organized REAPER
-            chains. No install, no account, and no file uploads.
-          </p>
-        </div>
-        <div className="hero-note">
-          <span className="hero-note-number">100%</span>
-          <span>on-device processing</span>
-          <p>Your files never leave this tab.</p>
-        </div>
+      <section className="intro" id="top">
+        <h1>Convert Soundminer presets to REAPER FX chains.</h1>
+        <p>
+          Add a Soundminer preset database or standalone exports. The tool
+          converts supported VST2 and VST3 presets and gives you a ZIP of
+          <code>.RfxChain</code> files.
+        </p>
+        <p className="privacy-note">
+          Your files are processed in this tab. Nothing is uploaded.
+        </p>
       </section>
 
       <section className="converter" aria-labelledby="converter-title">
         <div className="converter-heading">
-          <div>
-            <p className="section-index">01 / Add your files</p>
-            <h2 id="converter-title">Build a conversion bundle</h2>
-          </div>
+          <h2 id="converter-title">Add files</h2>
           <button
             type="button"
             className="text-button reset-button"
@@ -412,17 +393,24 @@ export default function Home() {
             +
           </span>
           <div>
-            <strong>Drop conversion files here</strong>
+            <strong>Drop files here</strong>
             <p>
-              or <span>choose files</span> from your computer
+              or <span>choose files</span>
             </p>
           </div>
-          <small>.SQLITE · .DSPPRESET · REAPER-VSTPLUGINS*.INI · VST-*.INI</small>
+          <small>
+            .sqlite, .db, .dsppreset, reaper-vstplugins*.ini, vst-*.ini
+          </small>
         </div>
+
+        <p className="file-guidance">
+          Add a database or at least one <code>.dsppreset</code>. REAPER scan
+          caches are needed for VST3 identity matching.
+        </p>
 
         <div className="file-grid">
           <FileCard
-            eyebrow="Input option"
+            eyebrow="Source"
             title={bundle.database?.name ?? "Soundminer database"}
             detail={
               bundle.database
@@ -435,7 +423,7 @@ export default function Home() {
             }
           />
           <FileCard
-            eyebrow="Input option"
+            eyebrow="Source"
             title={
               bundle.presets.length
                 ? `${bundle.presets.length} standalone export${
@@ -455,7 +443,7 @@ export default function Home() {
             }
           />
           <FileCard
-            eyebrow="For VST3"
+            eyebrow="VST3"
             title={
               bundle.caches.length
                 ? `${bundle.caches.length} REAPER scan cache${
@@ -475,7 +463,7 @@ export default function Home() {
             }
           />
           <FileCard
-            eyebrow="Optional VST2"
+            eyebrow="VST2"
             title={
               bundle.templates.length
                 ? `${bundle.templates.length} pin template${
@@ -543,8 +531,7 @@ export default function Home() {
               disabled={!inputReady}
               onClick={startConversion}
             >
-              Make my chains
-              <span aria-hidden="true">→</span>
+              Convert to ZIP
             </button>
           )}
         </div>
@@ -567,42 +554,38 @@ export default function Home() {
         )}
       </section>
 
-      <section className="how-it-works" aria-labelledby="how-title">
-        <div>
-          <p className="section-index">02 / What happens</p>
-          <h2 id="how-title">A local handoff, end to end.</h2>
-        </div>
-        <ol>
-          <li>
-            <span>1</span>
-            <div>
-              <strong>Read</strong>
-              <p>The browser opens your Soundminer database or exports in a private workspace.</p>
-            </div>
-          </li>
-          <li>
-            <span>2</span>
-            <div>
-              <strong>Resolve</strong>
-              <p>VST2 and VST3 state is matched to the REAPER metadata you provide.</p>
-            </div>
-          </li>
-          <li>
-            <span>3</span>
-            <div>
-              <strong>Package</strong>
-              <p>Converted chains and a readable report are bundled into one ZIP.</p>
-            </div>
-          </li>
-        </ol>
+      <section className="file-help" aria-labelledby="file-help-title">
+        <h2 id="file-help-title">What files do I need?</h2>
+        <dl>
+          <div>
+            <dt>Preset source</dt>
+            <dd>
+              A Soundminer <code>pluginpresets.sqlite</code> database, one or
+              more <code>.dsppreset</code> exports, or both.
+            </dd>
+          </div>
+          <div>
+            <dt>For VST3 presets</dt>
+            <dd>
+              Add REAPER&apos;s <code>reaper-vstplugins*.ini</code> scan cache
+              so plugins can be identified.
+            </dd>
+          </div>
+          <div>
+            <dt>Optional for VST2</dt>
+            <dd>
+              Add <code>vst-*.ini</code> preset banks to preserve exact
+              pin and channel routing.
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <footer>
-        <p>
-          Independent, open-source software. Soundminer and REAPER are trademarks
-          of their respective owners.
-        </p>
-        <span>Nothing uploaded. Nothing stored.</span>
+        <span>Independent open-source tool.</span>
+        <a href="https://github.com/nickvonkaenel/soundminer2reaper">
+          Source on GitHub
+        </a>
       </footer>
     </main>
   );

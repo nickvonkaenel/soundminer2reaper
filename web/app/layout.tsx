@@ -2,20 +2,20 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "soundminer2reaper — Browser preset converter",
+  title: "soundminer2reaper",
   description:
-    "Convert Soundminer VST2 and VST3 presets into REAPER FX chains without uploading your files.",
+    "Convert Soundminer VST2 and VST3 presets into REAPER FX chains in your browser.",
   openGraph: {
-    title: "Soundminer → REAPER, right in your browser",
+    title: "soundminer2reaper",
     description:
-      "Drop in your preset database and download organized REAPER FX chains. Files never leave your device.",
+      "Convert Soundminer preset databases and exports into REAPER FX chains.",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "Soundminer → REAPER, right in your browser",
+    title: "soundminer2reaper",
     description:
-      "Convert VST2 and VST3 presets locally and download the chains as a ZIP.",
+      "Convert Soundminer presets into REAPER FX chains in your browser.",
   },
 };
 
