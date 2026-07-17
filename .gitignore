@@ -1,0 +1,32 @@
+# Source preset data and REAPER exports may contain licensed or personal data.
+pluginpresets.sqlite
+pluginpresets.sqlite-*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+presets/
+chains/
+chains_*/
+*.RfxChain
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
