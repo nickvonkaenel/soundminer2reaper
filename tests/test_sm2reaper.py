@@ -174,15 +174,19 @@ class ParsingTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def _make_database(self, directory):
-        db_path = Path(directory, "pluginpresets.sqlite")
+    @staticmethod
+    def _make_human_data():
         descriptor = '<plugin uid="54657374" numInputs="2" numOutputs="2"/>'
-        human_data = plistlib.dumps([{
+        return plistlib.dumps([{
             "ProductName": "Example",
             "VendorName": "Vendor",
             "VSTChunk": b"state",
             "plug_data": {"plugin_descriptor": descriptor},
         }])
+
+    def _make_database(self, directory):
+        db_path = Path(directory, "pluginpresets.sqlite")
+        human_data = self._make_human_data()
         with closing(sqlite3.connect(db_path)) as con:
             con.execute(
                 "CREATE TABLE folders "
@@ -199,6 +203,27 @@ class CommandTests(unittest.TestCase):
             )
             con.commit()
         return db_path
+
+    def test_converts_standalone_dsppreset_without_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export_path = Path(tmp, "Standalone example.dsppreset")
+            export_path.write_bytes(self._make_human_data())
+            out_dir = Path(tmp, "chains")
+
+            args = [
+                "--db",
+                "",
+                "--dsppreset",
+                os.fspath(export_path),
+                "--out",
+                os.fspath(out_dir),
+            ]
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(sm2reaper.main(args), 0)
+
+            self.assertTrue(
+                Path(out_dir, "Standalone example.RfxChain").is_file()
+            )
 
     def test_refuses_to_replace_existing_output_without_force(self):
         with tempfile.TemporaryDirectory() as tmp:

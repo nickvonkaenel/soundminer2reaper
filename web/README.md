@@ -2,7 +2,8 @@
 
 The browser interface for `soundminer2reaper`. It runs the existing Python
 converter through Pyodide in a web worker, then returns generated REAPER chains
-and a conversion report as a ZIP.
+and a conversion report as a ZIP. The input can be a Soundminer preset database,
+one or more standalone `.dsppreset` exports, or both.
 
 Files remain in the browser's temporary memory and are not uploaded to the site
 or persisted by the application.

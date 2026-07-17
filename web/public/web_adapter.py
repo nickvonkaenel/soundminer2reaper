@@ -14,7 +14,7 @@ import sm2reaper
 
 def run_conversion(config):
     """Run the CLI module against browser-local paths and create a ZIP result."""
-    database = config["database"]
+    database = config.get("database") or ""
     templates = config["templates"]
     output = Path(config["output"])
     zip_path = Path(config["zipPath"])
@@ -28,6 +28,8 @@ def run_conversion(config):
         "--out",
         str(output),
     ]
+    for preset_path in config.get("presetPaths", []):
+        arguments.extend(("--dsppreset", preset_path))
     for cache_path in config.get("cachePaths", []):
         arguments.extend(("--reaper-cache", cache_path))
 

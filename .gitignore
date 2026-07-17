@@ -5,6 +5,8 @@ pluginpresets.sqlite-*
 *.sqlite-*
 *.db
 *.db-*
+*.dsppreset
+reaper-vstplugins*.ini
 presets/
 chains/
 chains_*/

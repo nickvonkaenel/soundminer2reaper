@@ -65,13 +65,28 @@ self.onmessage = async (event) => {
     postStatus("Copying files into the local workspace…", 46);
     pyodide.FS.mkdirTree("/work");
     pyodide.FS.mkdirTree("/work/caches");
+    pyodide.FS.mkdirTree("/work/exports");
     pyodide.FS.mkdirTree("/work/templates");
 
-    const databasePath = "/work/pluginpresets.sqlite";
-    pyodide.FS.writeFile(
-      databasePath,
-      new Uint8Array(event.data.database.buffer),
-    );
+    let databasePath = "";
+    if (event.data.database) {
+      databasePath = "/work/pluginpresets.sqlite";
+      pyodide.FS.writeFile(
+        databasePath,
+        new Uint8Array(event.data.database.buffer),
+      );
+    }
+
+    const presetPaths = [];
+    event.data.presets.forEach((file, index) => {
+      let name = safeName(file.name, `preset-${index}.dsppreset`);
+      if (!name.toLowerCase().endsWith(".dsppreset")) {
+        name = `${name}.dsppreset`;
+      }
+      const path = `/work/exports/${index}-${name}`;
+      pyodide.FS.writeFile(path, new Uint8Array(file.buffer));
+      presetPaths.push(path);
+    });
 
     const cachePaths = [];
     event.data.caches.forEach((file, index) => {
@@ -97,6 +112,7 @@ self.onmessage = async (event) => {
     postStatus("Converting plugin state and building chains…", 62);
     const config = {
       database: databasePath,
+      presetPaths,
       cachePaths,
       templates: "/work/templates",
       output: "/work/chains",
@@ -126,7 +142,7 @@ web_adapter.run_conversion(json.loads(_web_config_json))
     const rawMessage =
       error instanceof Error ? error.message : String(error);
     const message = rawMessage.includes("database")
-      ? "The database could not be converted. Confirm it is a Soundminer plugin-preset database and try again."
+      ? "The selected input could not be converted. Confirm it is a Soundminer preset database or .dsppreset export and try again."
       : `Conversion failed: ${rawMessage}`;
     self.postMessage({ type: "error", message });
   }

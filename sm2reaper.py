@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-sm2reaper -- Convert Soundminer plugin-preset databases into Reaper FX chains.
+sm2reaper -- Convert Soundminer plugin presets into Reaper FX chains.
 
-Reads a Soundminer `pluginpresets.sqlite` database, parses each preset's plugin
-"rack" (stored as an Apple plist inside the `human_data` column), and emits one
-Reaper `.RfxChain` file per preset, mirroring the Soundminer folder tree.
+Reads a Soundminer `pluginpresets.sqlite` database or standalone `.dsppreset`
+exports, parses each preset's plugin "rack" (stored as an Apple plist), and
+emits one Reaper `.RfxChain` file per preset.
 
 Handles both plugin formats Soundminer stores:
 
@@ -711,6 +711,38 @@ def load_presets(db_path: str):
     return out
 
 
+def load_dsppresets(paths):
+    """Load standalone Soundminer ``.dsppreset`` rack exports.
+
+    Each input may be a file or a directory. Directories are searched
+    recursively for ``.dsppreset`` files.
+    """
+    files = []
+    for value in paths:
+        path = Path(value)
+        if path.is_dir():
+            files.extend(sorted(
+                candidate
+                for candidate in path.rglob("*")
+                if candidate.is_file()
+                and candidate.suffix.lower() == ".dsppreset"
+            ))
+        elif path.is_file():
+            files.append(path)
+        else:
+            print(f"warning: input not found: {path}", file=sys.stderr)
+
+    rows = []
+    for index, path in enumerate(files, start=1):
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            print(f"warning: cannot read {path}: {exc}", file=sys.stderr)
+            continue
+        rows.append((f"export-{index}", path.stem, "", raw))
+    return rows
+
+
 def default_reaper_caches():
     """Return scan-cache files from REAPER's standard per-user resource path."""
     roots = []
@@ -742,7 +774,24 @@ def default_reaper_caches():
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Convert Soundminer presets to REAPER FX chains.")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    ap.add_argument("--db", default="pluginpresets.sqlite", help="Soundminer SQLite database")
+    ap.add_argument(
+        "--db",
+        default="pluginpresets.sqlite",
+        help=(
+            "Soundminer SQLite database; pass an empty value to use only "
+            "--dsppreset inputs"
+        ),
+    )
+    ap.add_argument(
+        "--dsppreset",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "standalone Soundminer .dsppreset file or directory "
+            "(repeatable; may be used with or instead of --db)"
+        ),
+    )
     ap.add_argument("--presets-dir", default="presets",
                     help="directory of REAPER vst-*.ini banks (for exact VST2 pin templates)")
     ap.add_argument(
@@ -764,8 +813,16 @@ def main(argv=None):
                     help="replace existing .RfxChain files in the output directory")
     args = ap.parse_args(argv)
 
-    if not os.path.exists(args.db):
+    db_was_explicit = args.db != ap.get_default("db")
+    use_db = bool(args.db) and os.path.exists(args.db)
+    if args.db and not use_db and (db_was_explicit or not args.dsppreset):
         print(f"error: db not found: {args.db}", file=sys.stderr)
+        return 2
+    if not use_db and not args.dsppreset:
+        print(
+            "error: no input found; provide --db or --dsppreset",
+            file=sys.stderr,
+        )
         return 2
     if args.sample < 0:
         print("error: --sample must be zero or greater", file=sys.stderr)
@@ -783,7 +840,10 @@ def main(argv=None):
             cache_paths.append(path)
     caches = parse_reaper_caches(cache_paths)
 
-    raw_rows = load_presets(args.db)
+    raw_rows = []
+    if use_db:
+        raw_rows.extend(load_presets(args.db))
+    raw_rows.extend(load_dsppresets(args.dsppreset))
     plists = []
     for _pid, _name, _folder, hd in raw_rows:
         try:

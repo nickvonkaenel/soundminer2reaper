@@ -74,6 +74,46 @@ class WebAdapterTests(unittest.TestCase):
                     {"Example preset.RfxChain", "conversion-report.txt"},
                 )
 
+    def test_conversion_accepts_standalone_dsppreset_without_database(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            export_path = root / "Standalone example.dsppreset"
+            output = root / "chains"
+            zip_path = root / "result.zip"
+            summary_path = root / "summary.json"
+            templates = root / "templates"
+            templates.mkdir()
+
+            descriptor = (
+                '<plugin uid="54657374" numInputs="2" numOutputs="2"/>'
+            )
+            export_path.write_bytes(plistlib.dumps([{
+                "ProductName": "Example",
+                "VendorName": "Vendor",
+                "VSTChunk": b"state",
+                "plug_data": {"plugin_descriptor": descriptor},
+            }]))
+
+            summary = web_adapter.run_conversion({
+                "database": "",
+                "presetPaths": [str(export_path)],
+                "templates": str(templates),
+                "cachePaths": [],
+                "output": str(output),
+                "zipPath": str(zip_path),
+                "summaryPath": str(summary_path),
+            })
+
+            self.assertEqual(summary["chainCount"], 1)
+            with zipfile.ZipFile(zip_path) as archive:
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {
+                        "Standalone example.RfxChain",
+                        "conversion-report.txt",
+                    },
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

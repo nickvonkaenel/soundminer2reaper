@@ -14,6 +14,7 @@ type Phase = "idle" | "preparing" | "converting" | "done" | "error";
 
 type FileBundle = {
   database: File | null;
+  presets: File[];
   caches: File[];
   templates: File[];
   rejected: string[];
@@ -36,12 +37,14 @@ type WorkerMessage =
 
 const EMPTY_BUNDLE: FileBundle = {
   database: null,
+  presets: [],
   caches: [],
   templates: [],
   rejected: [],
 };
 
 const DATABASE_PATTERN = /\.(sqlite|sqlite3|db)$/i;
+const DSPPRESET_PATTERN = /\.dsppreset$/i;
 const CACHE_PATTERN = /^reaper-vstplugins.*\.ini$/i;
 const TEMPLATE_PATTERN = /^vst-.*\.ini$/i;
 
@@ -101,7 +104,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState(
-    "Add a Soundminer database to begin.",
+    "Add a Soundminer database or .dsppreset export to begin.",
   );
   const [progress, setProgress] = useState(0);
   const [summary, setSummary] = useState<ConversionSummary | null>(null);
@@ -111,6 +114,10 @@ export default function Home() {
   const cacheSize = useMemo(
     () => bundle.caches.reduce((total, file) => total + file.size, 0),
     [bundle.caches],
+  );
+  const presetSize = useMemo(
+    () => bundle.presets.reduce((total, file) => total + file.size, 0),
+    [bundle.presets],
   );
   const templateSize = useMemo(
     () => bundle.templates.reduce((total, file) => total + file.size, 0),
@@ -135,6 +142,7 @@ export default function Home() {
     if (!incoming.length) return;
     setBundle((current) => {
       let database = current.database;
+      const presets: File[] = [];
       const caches: File[] = [];
       const templates: File[] = [];
       const rejected: string[] = [];
@@ -142,6 +150,8 @@ export default function Home() {
       for (const file of incoming) {
         if (DATABASE_PATTERN.test(file.name)) {
           database = file;
+        } else if (DSPPRESET_PATTERN.test(file.name)) {
+          presets.push(file);
         } else if (CACHE_PATTERN.test(file.name)) {
           caches.push(file);
         } else if (TEMPLATE_PATTERN.test(file.name)) {
@@ -153,6 +163,7 @@ export default function Home() {
 
       return {
         database,
+        presets: mergeUnique(current.presets, presets),
         caches: mergeUnique(current.caches, caches),
         templates: mergeUnique(current.templates, templates),
         rejected,
@@ -188,12 +199,16 @@ export default function Home() {
     cancelConversion();
     setBundle(EMPTY_BUNDLE);
     setSummary(null);
-    setStatus("Add a Soundminer database to begin.");
+    setStatus("Add a Soundminer database or .dsppreset export to begin.");
     revokeDownload();
   }, [cancelConversion, revokeDownload]);
 
   const startConversion = async () => {
-    if (!bundle.database || phase === "preparing" || phase === "converting") {
+    if (
+      (!bundle.database && !bundle.presets.length)
+      || phase === "preparing"
+      || phase === "converting"
+    ) {
       return;
     }
 
@@ -205,7 +220,15 @@ export default function Home() {
     setStatus("Reading your files…");
 
     try {
-      const databaseBuffer = await bundle.database.arrayBuffer();
+      const databaseBuffer = bundle.database
+        ? await bundle.database.arrayBuffer()
+        : null;
+      const presetFiles = await Promise.all(
+        bundle.presets.map(async (file) => ({
+          name: file.name,
+          buffer: await file.arrayBuffer(),
+        })),
+      );
       const cacheFiles = await Promise.all(
         bundle.caches.map(async (file) => ({
           name: file.name,
@@ -270,17 +293,21 @@ export default function Home() {
       };
 
       const transferables = [
-        databaseBuffer,
+        ...(databaseBuffer ? [databaseBuffer] : []),
+        ...presetFiles.map((file) => file.buffer),
         ...cacheFiles.map((file) => file.buffer),
         ...templateFiles.map((file) => file.buffer),
       ];
       worker.postMessage(
         {
           type: "convert",
-          database: {
-            name: bundle.database.name,
-            buffer: databaseBuffer,
-          },
+          database: bundle.database && databaseBuffer
+            ? {
+                name: bundle.database.name,
+                buffer: databaseBuffer,
+              }
+            : null,
+          presets: presetFiles,
           caches: cacheFiles,
           templates: templateFiles,
         },
@@ -295,6 +322,7 @@ export default function Home() {
 
   const isBusy = phase === "preparing" || phase === "converting";
   const databaseReady = Boolean(bundle.database);
+  const inputReady = databaseReady || bundle.presets.length > 0;
 
   return (
     <main className="site-shell">
@@ -327,7 +355,7 @@ export default function Home() {
         <div className="hero-note">
           <span className="hero-note-number">100%</span>
           <span>on-device processing</span>
-          <p>Your database never leaves this tab.</p>
+          <p>Your files never leave this tab.</p>
         </div>
       </section>
 
@@ -341,7 +369,11 @@ export default function Home() {
             type="button"
             className="text-button reset-button"
             onClick={reset}
-            disabled={!databaseReady && !bundle.caches.length && !bundle.templates.length}
+            disabled={
+              !inputReady
+              && !bundle.caches.length
+              && !bundle.templates.length
+            }
           >
             Clear all
           </button>
@@ -373,7 +405,7 @@ export default function Home() {
             className="visually-hidden"
             type="file"
             multiple
-            accept=".sqlite,.sqlite3,.db,.ini"
+            accept=".sqlite,.sqlite3,.db,.dsppreset,.ini"
             onChange={onInputChange}
           />
           <span className="drop-symbol" aria-hidden="true">
@@ -385,12 +417,12 @@ export default function Home() {
               or <span>choose files</span> from your computer
             </p>
           </div>
-          <small>.SQLITE · REAPER-VSTPLUGINS*.INI · VST-*.INI</small>
+          <small>.SQLITE · .DSPPRESET · REAPER-VSTPLUGINS*.INI · VST-*.INI</small>
         </div>
 
         <div className="file-grid">
           <FileCard
-            eyebrow="Required"
+            eyebrow="Input option"
             title={bundle.database?.name ?? "Soundminer database"}
             detail={
               bundle.database
@@ -400,6 +432,26 @@ export default function Home() {
             ready={Boolean(bundle.database)}
             onClear={() =>
               setBundle((current) => ({ ...current, database: null }))
+            }
+          />
+          <FileCard
+            eyebrow="Input option"
+            title={
+              bundle.presets.length
+                ? `${bundle.presets.length} standalone export${
+                    bundle.presets.length === 1 ? "" : "s"
+                  }`
+                : "Standalone exports"
+            }
+            detail={
+              bundle.presets.length
+                ? formatBytes(presetSize)
+                : "One or more Soundminer .dsppreset files"
+            }
+            count={bundle.presets.length}
+            ready={bundle.presets.length > 0}
+            onClear={() =>
+              setBundle((current) => ({ ...current, presets: [] }))
             }
           />
           <FileCard
@@ -453,7 +505,7 @@ export default function Home() {
           </p>
         )}
 
-        {databaseReady && !bundle.caches.length && (
+        {inputReady && !bundle.caches.length && (
           <p className="inline-note">
             No REAPER scan cache selected. VST2 can still convert, but VST3
             entries without an identity match will be skipped.
@@ -488,7 +540,7 @@ export default function Home() {
             <button
               type="button"
               className="primary-button"
-              disabled={!databaseReady}
+              disabled={!inputReady}
               onClick={startConversion}
             >
               Make my chains
@@ -525,7 +577,7 @@ export default function Home() {
             <span>1</span>
             <div>
               <strong>Read</strong>
-              <p>The browser opens your Soundminer database in a private workspace.</p>
+              <p>The browser opens your Soundminer database or exports in a private workspace.</p>
             </div>
           </li>
           <li>

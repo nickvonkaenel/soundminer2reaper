@@ -52,7 +52,9 @@ test("ships the converter assets and removes the starter", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(page, /new Worker/);
   assert.match(page, /soundminer-reaper-chains\.zip/);
+  assert.match(page, /\.dsppreset/);
   assert.match(worker, /pyodide\/v314\.0\.2/);
+  assert.match(worker, /presetPaths/);
   assert.match(adapter, /import sm2reaper/);
   assert.match(converter, /__version__ = "0\.2\.0"/);
 

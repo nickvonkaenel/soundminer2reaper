@@ -1,10 +1,11 @@
 # soundminer2reaper
 
 `soundminer2reaper` is an independent command-line tool that converts a
-Soundminer plugin-preset database (`pluginpresets.sqlite`) into REAPER FX chains
-(`.RfxChain`). It creates one chain per preset and preserves the source folder
-grouping. Both VST2 and VST3 plugin state are supported; unsupported Audio Unit
-and parameter-only entries are reported and skipped.
+Soundminer plugin-preset database (`pluginpresets.sqlite`) or standalone
+`.dsppreset` exports into REAPER FX chains (`.RfxChain`). It creates one chain
+per preset and preserves database folder grouping. Both VST2 and VST3 plugin
+state are supported; unsupported Audio Unit and parameter-only entries are
+reported and skipped.
 
 The converter uses only the Python standard library. Python 3.8 or newer is
 required.
@@ -27,6 +28,12 @@ python sm2reaper.py --db /path/to/pluginpresets.sqlite --list --only "Preset nam
 
 # Convert every supported preset
 python sm2reaper.py --db /path/to/pluginpresets.sqlite --out ./chains
+
+# Convert one or more standalone exports without a database
+python sm2reaper.py --db "" --dsppreset /path/to/export.dsppreset --out ./chains
+
+# Convert every .dsppreset below a directory
+python sm2reaper.py --db "" --dsppreset /path/to/exports --out ./chains
 ```
 
 You can also install the command locally:
@@ -38,10 +45,11 @@ sm2reaper --db /path/to/pluginpresets.sqlite --out ./chains
 
 ### Browser app
 
-The `web/` project provides a drag-and-drop version of the converter. It runs
-the same Python implementation locally in a browser worker and returns the
-generated chains plus a conversion report as a ZIP. Selected databases, plugin
-caches, and preset banks are not uploaded or stored by the application.
+The `web/` project provides a drag-and-drop version of the converter. It accepts
+a preset database, standalone `.dsppreset` exports, or both. The same Python
+implementation runs locally in a browser worker and returns the generated
+chains plus a conversion report as a ZIP. Selected inputs, plugin caches, and
+preset banks are not uploaded or stored by the application.
 
 For local web development:
 
@@ -55,7 +63,8 @@ npm run dev
 
 | Option | Description |
 | --- | --- |
-| `--db PATH` | Soundminer SQLite database. Defaults to `pluginpresets.sqlite`. |
+| `--db PATH` | Soundminer SQLite database. Defaults to `pluginpresets.sqlite`. Pass an empty value when converting only standalone exports. |
+| `--dsppreset PATH` | Standalone Soundminer `.dsppreset` file or directory. Directories are searched recursively. May be repeated and used with or instead of `--db`. |
 | `--presets-dir DIR` | Optional directory of REAPER `vst-*.ini` preset banks. These provide exact VST2 pin/channel templates. Defaults to `presets`. |
 | `--reaper-cache PATH` | Additional REAPER `reaper-vstplugins*.ini` scan cache used to resolve VST3 class GUIDs and numeric IDs. May be repeated. The standard per-user REAPER resource path is checked automatically. |
 | `--out DIR` | Output root. Defaults to `chains`. |
