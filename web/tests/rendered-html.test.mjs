@@ -34,6 +34,8 @@ test("server-renders the browser converter", async () => {
   assert.match(html, /<title>soundminer2reaper<\/title>/i);
   assert.match(html, /Convert Soundminer presets to REAPER FX chains/i);
   assert.match(html, /Runs locally in your browser/i);
+  assert.match(html, /Add individual presets/i);
+  assert.match(html, /One or more \.dsppreset files/i);
   assert.match(html, /Drop files here/i);
   assert.match(html, /Nothing is uploaded/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);

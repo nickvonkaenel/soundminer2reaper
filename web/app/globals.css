@@ -156,6 +156,72 @@ code {
   text-decoration: none;
 }
 
+.source-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.source-choice {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.source-choice:hover {
+  border-color: var(--accent);
+  background: #111b19;
+}
+
+.source-choice span,
+.source-choice strong,
+.source-choice small {
+  display: block;
+}
+
+.source-choice span {
+  margin-bottom: 7px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.source-choice strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.source-choice small {
+  margin-top: 5px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.drop-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.drop-divider::before,
+.drop-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+
 .drop-zone {
   min-height: 142px;
   display: grid;
@@ -536,6 +602,10 @@ footer a:hover {
 
   .converter {
     padding: 20px 16px;
+  }
+
+  .source-choices {
+    grid-template-columns: 1fr;
   }
 
   .drop-zone {

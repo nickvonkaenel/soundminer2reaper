@@ -99,6 +99,8 @@ function FileCard({
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const databaseInputRef = useRef<HTMLInputElement>(null);
+  const presetInputRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
   const [bundle, setBundle] = useState<FileBundle>(EMPTY_BUNDLE);
   const [isDragging, setIsDragging] = useState(false);
@@ -360,6 +362,46 @@ export default function Home() {
           </button>
         </div>
 
+        <div className="source-choices">
+          <button
+            type="button"
+            className="source-choice"
+            onClick={() => databaseInputRef.current?.click()}
+          >
+            <span>Database</span>
+            <strong>Choose a preset database</strong>
+            <small>.sqlite or .db</small>
+          </button>
+          <button
+            type="button"
+            className="source-choice"
+            onClick={() => presetInputRef.current?.click()}
+          >
+            <span>Individual presets</span>
+            <strong>Add individual presets</strong>
+            <small>One or more .dsppreset files</small>
+          </button>
+          <input
+            ref={databaseInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".sqlite,.sqlite3,.db"
+            onChange={onInputChange}
+          />
+          <input
+            ref={presetInputRef}
+            className="visually-hidden"
+            type="file"
+            multiple
+            accept=".dsppreset"
+            onChange={onInputChange}
+          />
+        </div>
+
+        <div className="drop-divider">
+          <span>or add everything together</span>
+        </div>
+
         <div
           className={`drop-zone ${isDragging ? "is-dragging" : ""}`}
           role="button"
@@ -404,8 +446,8 @@ export default function Home() {
         </div>
 
         <p className="file-guidance">
-          Add a database or at least one <code>.dsppreset</code>. REAPER scan
-          caches are needed for VST3 identity matching.
+          Convert a whole database, selected individual presets, or both.
+          REAPER scan caches are needed for VST3 identity matching.
         </p>
 
         <div className="file-grid">
@@ -429,7 +471,7 @@ export default function Home() {
                 ? `${bundle.presets.length} standalone export${
                     bundle.presets.length === 1 ? "" : "s"
                   }`
-                : "Standalone exports"
+                : "Individual presets"
             }
             detail={
               bundle.presets.length
