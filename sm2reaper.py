@@ -6,16 +6,17 @@ Reads a Soundminer `pluginpresets.sqlite` database, parses each preset's plugin
 "rack" (stored as an Apple plist inside the `human_data` column), and emits one
 Reaper `.RfxChain` file per preset, mirroring the Soundminer folder tree.
 
-Each plugin slot in a rack is a VST2 plugin with its opaque state chunk. That
-chunk is wrapped in Reaper's VST2 state-container format (reverse-engineered from
-Reaper `.ini` FX-preset banks and real `.RfxChain` files) and written into a
-`<VST ...>` FX block.
+Handles both plugin formats Soundminer stores:
 
-Caveat: the presets reference plugins by their VST2 identity. A generated chain
-only auto-loads in a Reaper install that actually has the *same VST2 plugin*
-registered (the opaque chunk state itself is cross-platform). Plugins that aren't
-installed will show "offline" in Reaper, but their state is preserved and they
-relink once the plugin is present.
+* VST2 -- an opaque effGetChunk() blob, wrapped in REAPER's VST2 state
+  container.
+* VST3 -- component and controller state, decoded from Soundminer's state format
+  and wrapped in REAPER's VST3 state container. VST3 identity is resolved from a
+  REAPER `reaper-vstplugins*.ini` scan cache.
+
+A generated chain only auto-loads when the same plugin is registered in REAPER.
+Missing plugins may appear offline, but retain their state for later relinking.
+Audio Unit presets and VST2 float-parameter banks are reported and skipped.
 
 Pure standard library (sqlite3, plistlib, base64, struct). Python 3.8+.
 """
@@ -35,7 +36,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # ---------------------------------------------------------------------------
 # REAPER VST2 container constants, verified against REAPER preset banks and
@@ -53,6 +54,58 @@ BODY_GROUP = 96  # Reaper base64-encodes the chunk body in 96-byte groups per li
 # plist parses. The real 4-char fourcc is recovered from the descriptor's uid hex.
 _BAD_XML_CTRL = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
+# Soundminer encodes VST3 component and controller state with least-significant-
+# bit-first base64 packing and a shifted alphabet.
+_STD_B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+_SM_ALPHA = "." + _STD_B64[:63]
+_SM_IDX = {char: index for index, char in enumerate(_SM_ALPHA)}
+
+
+def sm_state_decode(field: str) -> bytes:
+    """Decode a Soundminer ``<length>.<body>`` VST3 state field."""
+    field = field.strip()
+    match = re.fullmatch(r"(\d+)\.(.*)", field, re.S)
+    expected_length = int(match.group(1)) if match else None
+    body = match.group(2) if match else field
+    buffer = 0
+    bit_count = 0
+    output = bytearray()
+
+    for char in body:
+        value = _SM_IDX.get(char)
+        if value is None:
+            continue
+        buffer |= value << bit_count
+        bit_count += 6
+        while bit_count >= 8:
+            output.append(buffer & 0xFF)
+            buffer >>= 8
+            bit_count -= 8
+
+    if expected_length is not None:
+        if len(output) < expected_length:
+            raise ValueError(
+                f"decoded VST3 state is {len(output)} bytes; "
+                f"expected {expected_length}"
+            )
+        del output[expected_length:]
+    return bytes(output)
+
+
+def vst3_pin_config(num_in: int, num_out: int):
+    """Build REAPER's channel-mask pin map for a VST3 plugin."""
+    num_in = max(num_in, 1)
+    num_out = max(num_out, 1)
+    values = [num_in]
+    for pin in range(num_in):
+        mask = 1 << pin
+        values.extend((mask & 0xFFFFFFFF, (mask >> 32) & 0xFFFFFFFF))
+    values.append(num_out)
+    for pin in range(num_out):
+        mask = 1 << pin
+        values.extend((mask & 0xFFFFFFFF, (mask >> 32) & 0xFFFFFFFF))
+    return values
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -62,14 +115,23 @@ _BAD_XML_CTRL = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 class PluginSlot:
     product: str
     vendor: str
-    uid_int: int             # VST2 unique id as a 32-bit int
-    chunk: bytes             # opaque effGetChunk() bytes
+    kind: str = "vst2"       # "vst2" or "vst3"
     bypassed: bool = False
     num_in: int = 2
     num_out: int = 2
     slot: int = 0
+    # VST2
+    uid_int: int = 0         # VST2 unique id as a 32-bit int
+    chunk: bytes = b""       # opaque effGetChunk() bytes
     uid_source: str = ""     # where the uid came from (diagnostics)
     is_waves_shell: bool = False
+    # VST3
+    decimal: int = 0         # REAPER's numeric plugin identifier
+    guid_hex: str = ""       # VST3 class GUID as 32 uppercase hex characters
+    filename: str = ""
+    component: bytes = b""   # IComponent state
+    controller: bytes = b""  # IEditController state
+    matched: bool = False    # identity resolved from a REAPER scan cache
 
     @property
     def ondisk_fourcc(self) -> bytes:
@@ -227,6 +289,101 @@ def _clean_str(v) -> str:
     return v or "" if isinstance(v, str) else ""
 
 
+def _plugin_type(d: dict) -> str:
+    """Return the plugin format stored in ``plug_data``, if present."""
+    plug_data = d.get("plug_data")
+    if not isinstance(plug_data, dict):
+        return ""
+    return _clean_str(plug_data.get("plugintype"))
+
+
+def _vst3_state(d: dict):
+    """Extract VST3 component and controller state from a ``VC2!`` blob."""
+    plug_data = d.get("plug_data")
+    if not isinstance(plug_data, dict):
+        return None
+    data = plug_data.get("plugindata")
+    if not isinstance(data, (bytes, bytearray)) or data[:4] != b"VC2!":
+        return None
+
+    xml = bytes(data)[8:].split(b"\x00", 1)[0].decode("utf-8", "replace")
+    component_match = re.search(
+        r"<IComponent>(.*?)</IComponent>", xml, re.S
+    )
+    if not component_match:
+        return None
+    controller_match = re.search(
+        r"<IEditController>(.*?)</IEditController>", xml, re.S
+    )
+    try:
+        component = sm_state_decode(component_match.group(1))
+        controller = (
+            sm_state_decode(controller_match.group(1))
+            if controller_match else b""
+        )
+    except ValueError:
+        return None
+    return component, controller
+
+
+def parse_reaper_caches(paths):
+    """Build VST3 identity lookup maps from REAPER plugin scan caches.
+
+    Each identity is indexed by display name and by a normalized plugin
+    filename. Invalid, missing, and VST2-only cache entries are ignored.
+    """
+    by_name = {}
+    by_file = {}
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                lines = handle.read().splitlines()
+        except OSError:
+            continue
+
+        for line in lines:
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            parts = value.split(",", 2)
+            if len(parts) < 3:
+                continue
+            # REAPER's cache syntax opens the class ID with "{" but has no
+            # matching closing brace before the following comma.
+            identity_match = re.fullmatch(
+                r"\s*(\d+)\{([0-9A-Fa-f]{32})\s*",
+                parts[1],
+            )
+            if not identity_match:
+                continue
+            decimal = int(identity_match.group(1))
+            guid = identity_match.group(2).upper()
+            display_name = parts[2].strip()
+            if display_name:
+                by_name.setdefault(display_name, (decimal, guid))
+            file_key = re.sub(r"[^a-z0-9.]", "", key.lower())
+            if file_key:
+                by_file.setdefault(file_key, (decimal, guid))
+    return {"by_name": by_name, "by_file": by_file}
+
+
+def _lookup_vst3_identity(
+    caches: dict, product: str, vendor: str, filename: str
+):
+    """Resolve a VST3 numeric identifier and class GUID from cache metadata."""
+    if not caches:
+        return None
+    display_name = f"{product} ({vendor})" if vendor else product
+    identity = (
+        caches.get("by_name", {}).get(display_name)
+        or caches.get("by_name", {}).get(product)
+    )
+    if identity or not filename:
+        return identity
+    file_key = re.sub(r"[^a-z0-9.]", "", filename.lower())
+    return caches.get("by_file", {}).get(file_key)
+
+
 def harvest_name_uids(plists, templates: dict) -> dict:
     """Build a {product_name: uid_int} map from high-confidence id sources, used as
     a fallback for old-format slots that store no usable id of their own."""
@@ -250,7 +407,14 @@ def harvest_name_uids(plists, templates: dict) -> dict:
     return name_uid
 
 
-def parse_preset(pid: int, name: str, folder: str, raw: bytes, name_uid: dict = None) -> Preset:
+def parse_preset(
+    pid: int,
+    name: str,
+    folder: str,
+    raw: bytes,
+    name_uid: dict = None,
+    caches: dict = None,
+) -> Preset:
     name_uid = name_uid or {}
     preset = Preset(id=pid, name=name, folder=folder)
     try:
@@ -269,6 +433,44 @@ def parse_preset(pid: int, name: str, folder: str, raw: bytes, name_uid: dict = 
         product = _clean_str(d.get("ProductName"))
         vendor = _clean_str(d.get("VendorName"))
         is_shell = product.startswith("WaveShell")
+
+        if _plugin_type(d).upper() == "VST3":
+            state = _vst3_state(d)
+            if state is None:
+                preset.notes.append(
+                    f"slot {i} '{product}': VST3 state not decodable -- skipped"
+                )
+                continue
+            raw_path = _clean_str(d.get("plugInPath")).replace("\\", "/")
+            filename = os.path.basename(raw_path)
+            identity = _lookup_vst3_identity(
+                caches or {}, product, vendor, filename
+            )
+            if identity is None:
+                preset.notes.append(
+                    f"slot {i} '{product}': VST3 identity not found in "
+                    "a REAPER scan cache -- skipped"
+                )
+                continue
+            decimal, guid = identity
+            num_in, num_out = _channel_counts(d)
+            component, controller = state
+            slots.append(PluginSlot(
+                kind="vst3",
+                product=product,
+                vendor=vendor,
+                bypassed=_is_bypassed(d),
+                num_in=num_in,
+                num_out=num_out,
+                slot=_slot_index(d, i),
+                decimal=decimal,
+                guid_hex=guid,
+                filename=filename or f"{product}.vst3",
+                component=component,
+                controller=controller,
+                matched=True,
+            ))
+            continue
 
         # State chunk: prefer the explicit VSTChunk; otherwise pull it out of the
         # .fxb embedded in plug_data.plugindata.
@@ -300,7 +502,8 @@ def parse_preset(pid: int, name: str, folder: str, raw: bytes, name_uid: dict = 
 
         ni, no = _channel_counts(d)
         slots.append(PluginSlot(
-            product=product, vendor=vendor, uid_int=uid_int, chunk=chunk,
+            kind="vst2", product=product, vendor=vendor,
+            uid_int=uid_int, chunk=chunk,
             bypassed=_is_bypassed(d), num_in=ni, num_out=no,
             slot=_slot_index(d, i), uid_source=src, is_waves_shell=is_shell,
         ))
@@ -367,7 +570,9 @@ def _b64_lines(preamble: bytes, chunk: bytes, trailer: bytes):
     return lines
 
 
-def build_vst_block(slot: PluginSlot, templates: dict, program_name: str = "") -> str:
+def build_vst2_block(
+    slot: PluginSlot, templates: dict, program_name: str = ""
+) -> str:
     fourcc = slot.ondisk_fourcc
     decimal = slot.uid_int
 
@@ -406,8 +611,58 @@ def build_vst_block(slot: PluginSlot, templates: dict, program_name: str = "") -
     return "\n".join(out)
 
 
+def build_vst3_block(slot: PluginSlot, program_name: str = "") -> str:
+    """Build a REAPER VST3 FX block from component and controller state."""
+    pin_config = vst3_pin_config(slot.num_in, slot.num_out)
+    component = slot.component
+    controller = slot.controller
+    chunk = (
+        struct.pack("<2i", len(component), 1)
+        + component
+        + struct.pack("<2i", len(controller), 0)
+        + controller
+    )
+    preamble = (
+        struct.pack("<I", slot.decimal)
+        + REAPER_VST_MARKER
+        + struct.pack(f"<{len(pin_config)}i", *pin_config)
+        + struct.pack("<i", len(chunk))
+        + struct.pack("<2i", 1, 0)
+    )
+    trailer = (
+        b"\x00"
+        + program_name.encode("latin-1", "replace")
+        + b"\x00"
+        + struct.pack("<i", 0)
+    )
+
+    display = f"VST3: {slot.product}"
+    if slot.vendor:
+        display += f" ({slot.vendor})"
+
+    out = [
+        f"BYPASS {1 if slot.bypassed else 0} 0",
+        (
+            f'<VST "{display}" "{slot.filename}" 0 "" '
+            f"{slot.decimal}{{{slot.guid_hex}}} \"\""
+        ),
+    ]
+    out.extend("  " + line for line in _b64_lines(preamble, chunk, trailer))
+    out.extend((">", "WAK 0 0"))
+    return "\n".join(out)
+
+
+# Kept as a compatibility alias for callers of the original VST2-only module.
+build_vst_block = build_vst2_block
+
+
 def build_rfxchain(preset: Preset, templates: dict) -> str:
-    blocks = [build_vst_block(s, templates) for s in preset.slots]
+    blocks = [
+        build_vst3_block(slot)
+        if slot.kind == "vst3"
+        else build_vst2_block(slot, templates)
+        for slot in preset.slots
+    ]
     return "\n".join(blocks) + "\n"
 
 
@@ -456,12 +711,50 @@ def load_presets(db_path: str):
     return out
 
 
+def default_reaper_caches():
+    """Return scan-cache files from REAPER's standard per-user resource path."""
+    roots = []
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            roots.append(os.path.join(appdata, "REAPER"))
+    elif sys.platform == "darwin":
+        roots.append(
+            os.path.join(
+                os.path.expanduser("~"),
+                "Library",
+                "Application Support",
+                "REAPER",
+            )
+        )
+    else:
+        config_home = os.environ.get(
+            "XDG_CONFIG_HOME", os.path.expanduser("~/.config")
+        )
+        roots.append(os.path.join(config_home, "REAPER"))
+
+    found = []
+    for root in roots:
+        found.extend(glob.glob(os.path.join(root, "reaper-vstplugins*.ini")))
+    return found
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Convert Soundminer presets to REAPER FX chains.")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--db", default="pluginpresets.sqlite", help="Soundminer SQLite database")
     ap.add_argument("--presets-dir", default="presets",
-                    help="directory of REAPER vst-*.ini banks (for exact pin-config templates)")
+                    help="directory of REAPER vst-*.ini banks (for exact VST2 pin templates)")
+    ap.add_argument(
+        "--reaper-cache",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "additional reaper-vstplugins*.ini scan cache used to resolve "
+            "VST3 identities (repeatable)"
+        ),
+    )
     ap.add_argument("--out", default="chains", help="Output directory root")
     ap.add_argument("--list", action="store_true", help="List presets and their plugins; write nothing")
     ap.add_argument("--sample", type=int, default=0, help="Convert only the first N matching presets")
@@ -481,6 +774,15 @@ def main(argv=None):
     templates = build_ini_templates(args.presets_dir)
     known_fourccs = set(templates)
 
+    cache_paths = []
+    seen_cache_paths = set()
+    for path in default_reaper_caches() + list(args.reaper_cache):
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized not in seen_cache_paths:
+            seen_cache_paths.add(normalized)
+            cache_paths.append(path)
+    caches = parse_reaper_caches(cache_paths)
+
     raw_rows = load_presets(args.db)
     plists = []
     for _pid, _name, _folder, hd in raw_rows:
@@ -490,7 +792,7 @@ def main(argv=None):
             plists.append(None)
     name_uid = harvest_name_uids(plists, templates)
 
-    presets = [parse_preset(pid, name, folder, hd, name_uid)
+    presets = [parse_preset(pid, name, folder, hd, name_uid, caches)
                for pid, name, folder, hd in raw_rows]
 
     if args.only:
@@ -498,14 +800,33 @@ def main(argv=None):
     if args.sample:
         presets = presets[:args.sample]
 
+    def slot_matched(slot):
+        if slot.kind == "vst3":
+            return slot.matched
+        return slot.ondisk_fourcc in known_fourccs
+
     if args.list:
+        if caches["by_name"]:
+            print(
+                f"# REAPER VST3 cache: {len(caches['by_name'])} plugin(s)"
+            )
         for p in presets:
             loc = f"{p.folder}/" if p.folder else ""
             print(f"[{p.id}] {loc}{p.name}  ({len(p.slots)} plugin(s))")
             for s in p.slots:
-                mark = "OK " if s.ondisk_fourcc in known_fourccs else "?? "
-                fc = s.ondisk_fourcc.decode("latin-1", "replace")
-                print(f"    {mark}{s.product} <{s.vendor}> id={fc!r} src={s.uid_source}")
+                mark = "OK " if slot_matched(s) else "?? "
+                if s.kind == "vst3":
+                    identity = s.guid_hex
+                    source = "REAPER cache"
+                else:
+                    identity = repr(
+                        s.ondisk_fourcc.decode("latin-1", "replace")
+                    )
+                    source = s.uid_source
+                print(
+                    f"    {mark}[{s.kind}] {s.product} <{s.vendor}> "
+                    f"id={identity} src={source}"
+                )
             for n in p.notes:
                 print(f"    !  {n}")
         return 0
@@ -540,7 +861,7 @@ def main(argv=None):
         return 2
 
     written = 0
-    total_slots = 0
+    slot_counts = {"vst2": 0, "vst3": 0}
     matched_slots = 0
     unmatched = {}
     all_notes = []
@@ -557,17 +878,34 @@ def main(argv=None):
             fh.write(build_rfxchain(p, templates))
         written += 1
         for s in p.slots:
-            total_slots += 1
-            if s.ondisk_fourcc in known_fourccs:
+            slot_counts[s.kind] += 1
+            if slot_matched(s):
                 matched_slots += 1
-            else:
+            elif s.kind == "vst2":
                 unmatched[s.product] = unmatched.get(s.product, 0) + 1
 
+    total_slots = slot_counts["vst2"] + slot_counts["vst3"]
     print(f"Wrote {written} chain(s) to {args.out!r}")
-    print(f"Plugin slots: {total_slots} total, {matched_slots} matched an installed-plugin "
-          f"template, {total_slots - matched_slots} not matched.")
+    print(
+        f"Plugin slots: {total_slots} total "
+        f"({slot_counts['vst3']} VST3, {slot_counts['vst2']} VST2)."
+    )
+    if slot_counts["vst3"]:
+        print(
+            f"  VST3: {slot_counts['vst3']} converted with identities "
+            "from a REAPER scan cache."
+        )
+    if slot_counts["vst2"]:
+        vst2_matched = matched_slots - slot_counts["vst3"]
+        print(
+            f"  VST2: {vst2_matched}/{slot_counts['vst2']} matched an "
+            "installed-plugin pin template."
+        )
     if unmatched:
-        print("\nPlugins with no matching template in presets/ (may show offline in REAPER):")
+        print(
+            "\nVST2 plugins with no template in presets/ "
+            "(still converted; may show offline in REAPER):"
+        )
         for name, c in sorted(unmatched.items(), key=lambda kv: -kv[1]):
             print(f"  {c:4d}  {name}")
     if all_notes:

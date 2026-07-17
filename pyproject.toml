@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "soundminer2reaper"
-version = "0.1.0"
-description = "Convert Soundminer plugin presets into REAPER FX chains"
+version = "0.2.0"
+description = "Convert Soundminer VST2 and VST3 plugin presets into REAPER FX chains"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
